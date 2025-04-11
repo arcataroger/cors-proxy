@@ -1,8 +1,6 @@
-import { type NextRequest, NextResponse } from "next/server";
+export const runtime = "nodejs";
 
-export const runtime = "edge";
-
-export async function GET(request: NextRequest): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const referrer = request.headers.get("referer");
 
   try {
@@ -11,29 +9,44 @@ export async function GET(request: NextRequest): Promise<Response> {
       const hostname = referrerUrl.hostname;
 
       if (hostname !== "localhost" && !hostname.endsWith(".datocms.com")) {
-        return new NextResponse("Invalid referrer", { status: 400 });
+        return new Response("Invalid referrer", { status: 400 });
       }
     }
   } catch (error) {
-    return new NextResponse("Invalid referrer", { status: 400 });
+    return new Response("Invalid referrer", { status: 400 });
   }
 
-  const { searchParams } = request.nextUrl;
-  const rawUrlParam = searchParams.get("url");
-  if (!rawUrlParam) {
-    return new NextResponse("No URL param specified", { status: 400 });
+  let destinationUrl = ''
+  try {
+    const urlAsObj = new URL(request.url);
+    const {searchParams} = urlAsObj
+    const encodedUrl = searchParams.get('url')
+    if(!searchParams || !encodedUrl) {
+      return new Response(`No valid URL parameter provided`, { status: 400 });
+    }
+    if(encodedUrl) {
+      destinationUrl = decodeURIComponent(encodedUrl)
+    }
+  } catch (e) {
+    return new Response(`Error parsing the URL: ${JSON.stringify(e)}`, { status: 400 });
   }
 
-  const decodedUrlParam = decodeURIComponent(rawUrlParam);
-
-  const destinationResponse = await fetch(decodedUrlParam);
+  const destinationResponse = await fetch(destinationUrl);
 
   const newHeaders = new Headers(destinationResponse.headers);
+
+  // Rewrite CORS to something more permissive
   newHeaders.set("Access-Control-Allow-Origin", "*");
   newHeaders.set('Access-Control-Allow-Methods', 'GET');
 
-  return new NextResponse(destinationResponse.body, {
+  // Strip these headers because our fetch may have decompressed the body
+  // and the recipient browser may ask for a different scheme anyway... let the web server handle that
+  newHeaders.delete('content-encoding');
+  newHeaders.delete('content-length');
+
+  return new Response(destinationResponse.body, {
     status: destinationResponse.status,
+    statusText: destinationResponse.statusText,
     headers: newHeaders,
   });
 }
